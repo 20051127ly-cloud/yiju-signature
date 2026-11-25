@@ -1,0 +1,288 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+/* 霞鹜臻楷 GB（OFL 1.1），按汉字分片加载，中文字体优先 */
+@import url('https://fontsapi.zeoseven.com/2/main/result.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 42 40% 96%;
+    --foreground: 30 6% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 30 6% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 6% 11%;
+    --primary: 30 6% 11%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 20% 92%;
+    --secondary-foreground: 30 6% 11%;
+    --muted: 40 20% 92%;
+    --muted-foreground: 35 6% 42%;
+    --accent: 40 20% 92%;
+    --accent-foreground: 30 6% 11%;
+    --destructive: 0 70% 48%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 38 22% 87%;
+    --input: 38 22% 87%;
+    --ring: 30 6% 11%;
+    --radius: 1rem;
+
+    --paper: #fbf8f1;
+    --paper-2: #ffffff;
+    --paper-3: #f3f0e9;
+    --circle: #ebe8e1;
+    --ink: #1b1a18;
+    --ink-soft: #6b6862;
+    --ink-faint: #9b978e;
+    --line: #e3dfd5;
+    --seal: #1b1a18;
+    --seal-soft: #f0eee8;
+    --sage: #1b1a18;
+    --sage-soft: #f0eee8;
+    --shadow-card: 0 2px 0 rgb(27 26 24 / 0.03), 0 18px 40px -28px rgb(27 26 24 / 0.32);
+    --bg-veil: rgb(251 248 241 / 0.84);
+  }
+
+  .dark {
+    --background: 30 6% 9%;
+    --foreground: 40 25% 92%;
+    --card: 30 6% 13%;
+    --card-foreground: 40 25% 92%;
+    --popover: 30 6% 13%;
+    --popover-foreground: 40 25% 92%;
+    --primary: 40 25% 92%;
+    --primary-foreground: 30 6% 9%;
+    --secondary: 30 5% 18%;
+    --secondary-foreground: 40 25% 92%;
+    --muted: 30 5% 18%;
+    --muted-foreground: 40 8% 62%;
+    --accent: 30 5% 18%;
+    --accent-foreground: 40 25% 92%;
+    --border: 30 5% 24%;
+    --input: 30 5% 24%;
+    --ring: 40 25% 92%;
+
+    --paper: #171614;
+    --paper-2: #211f1c;
+    --paper-3: #2a2723;
+    --circle: #25221e;
+    --ink: #f6f2e9;
+    --ink-soft: #b2ada3;
+    --ink-faint: #857f75;
+    --line: #3a362f;
+    --seal: #f6f2e9;
+    --seal-soft: #2a2723;
+    --sage: #f6f2e9;
+    --sage-soft: #2a2723;
+    --shadow-card: 0 2px 0 rgb(0 0 0 / 0.2), 0 18px 40px -28px rgb(0 0 0 / 0.6);
+    --bg-veil: rgb(23 22 20 / 0.88);
+  }
+
+  * { @apply border-border; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Outfit', 'LXGW ZhenKai GB', '霞鹜臻楷 GB', 'Noto Sans SC', -apple-system, 'PingFang SC', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: var(--ink);
+    background-color: var(--paper);
+    /* 画作铺满并适当拓宽；奶油色遮罩保证正文与各模块始终清晰 */
+    background-image:
+      linear-gradient(var(--bg-veil), var(--bg-veil)),
+      url('./assets/bg-painting.jpg');
+    background-size: cover;
+    background-position: center 32%;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
+  @media (max-width: 768px) {
+    body { background-attachment: scroll; }
+  }
+
+  ::selection { background: var(--ink); color: var(--paper); }
+}
+
+@layer components {
+  .font-display {
+    font-family: 'Outfit', 'LXGW ZhenKai GB', '霞鹜臻楷 GB', 'Noto Sans SC', -apple-system, 'PingFang SC', sans-serif;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .font-latin {
+    font-family: 'Outfit', sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .font-ui {
+    font-family: 'Outfit', 'LXGW ZhenKai GB', '霞鹜臻楷 GB', 'Noto Sans SC', -apple-system, 'PingFang SC', sans-serif;
+  }
+
+  /* 容器保持透明，让 body 上的画作透出来；卡片自身仍是不透明底色 */
+  .paper-surface {
+    background-color: transparent;
+    background-image: radial-gradient(circle at 85% 4%, rgb(27 26 24 / 0.02), transparent 32%);
+  }
+
+  .surface-card {
+    background-color: var(--paper-2);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ink-card {
+    background-color: var(--paper-2);
+    border: 1.5px solid var(--ink);
+    border-radius: 28px;
+    box-shadow: 6px 6px 0 rgb(27 26 24 / 0.06);
+  }
+  .dark .ink-card { box-shadow: 6px 6px 0 rgb(0 0 0 / 0.24); }
+
+  .hero-circle {
+    background-color: var(--circle);
+    border-radius: 9999px;
+  }
+
+  .seal-mark {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Outfit', 'LXGW ZhenKai GB', '霞鹜臻楷 GB', 'Noto Sans SC', sans-serif;
+  }
+
+  .btn-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    padding: 0.7rem 1.4rem;
+    cursor: pointer;
+    border: 1.5px solid var(--ink);
+    transition: background-color 180ms ease, color 180ms ease, opacity 180ms ease;
+    white-space: nowrap;
+  }
+  .btn-pill:hover { background: transparent; color: var(--ink); }
+  .btn-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-pill.is-ghost { background: transparent; color: var(--ink); }
+  .btn-pill.is-ghost:hover { background: var(--ink); color: var(--paper); }
+  .btn-pill[data-active='true'] { background: var(--ink); color: var(--paper); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper-2);
+    color: var(--ink-soft);
+    padding: 0.4rem 0.82rem;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--ink); color: var(--ink); }
+  .chip[data-active='true'] {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+
+  .chip-kw {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 999px;
+    padding: 0.32rem 0.55rem 0.32rem 0.78rem;
+    font-size: 0.76rem;
+    border: 1px solid var(--line);
+    cursor: default;
+    transition: border-color 160ms ease;
+  }
+  .chip-kw:hover { border-color: var(--ink); }
+
+  .tone-rose, .tone-sage, .tone-blue, .tone-amber, .tone-violet {
+    background: var(--paper-2);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+  .tone-sage { background: var(--paper-3); }
+  .tone-blue { color: var(--ink-soft); }
+  .tone-amber { background: var(--paper-3); }
+  .tone-violet { color: var(--ink-soft); }
+
+  .section-label {
+    font-size: 0.64rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .result-quote {
+    font-family: 'Outfit', 'LXGW ZhenKai GB', '霞鹜臻楷 GB', 'Noto Sans SC', -apple-system, 'PingFang SC', sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 1.85;
+    overflow-wrap: anywhere;
+  }
+
+  .quote-rule { background: var(--line); height: 1px; }
+
+  .stat-value {
+    font-family: 'Outfit', sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+
+  .nav-tab {
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: color 180ms ease, background-color 180ms ease;
+    white-space: nowrap;
+  }
+  .nav-tab:hover { color: var(--ink); }
+  .nav-tab[data-active='true'] { color: var(--paper); background: var(--ink); font-weight: 500; }
+
+  .code-line {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    background: var(--paper-3);
+    border: 1px solid var(--line);
+    border-radius: 0.7rem;
+    padding: 0.6rem 0.8rem;
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .doodle { color: var(--ink); }
+
+  .fade-in { animation: fade-in 280ms ease both; }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
