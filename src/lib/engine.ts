@@ -1,5 +1,19 @@
 import { CLICHE_PATTERNS, GROUPS, type CorpusGroup, type GroupOrigin } from '../data/corpus'
 import { DIMENSIONS, LEXICON, QUESTIONS, SEMANTIC_WORDS, type Dimension } from '../data/taxonomy'
+import {
+  VECTOR_DIMS,
+  buildEntryVector,
+  cosine,
+  conceptProfileFor,
+  conceptScore,
+  hasPremiumConflict,
+  premiumPenalty,
+  queryVectorFrom,
+  styleDistance,
+  vectorFromTags,
+  zeroVector,
+  type SemanticVector,
+} from '../data/semantics'
 
 export type SignatureLength = 'tiny' | 'short' | 'medium' | 'long'
 
@@ -19,6 +33,7 @@ export type Signature = {
   length: SignatureLength
   popularity: 1 | 2 | 3
   hasSource: boolean
+  vector: SemanticVector
 }
 
 export type CorpusIndex = {
@@ -29,6 +44,7 @@ export type CorpusIndex = {
   tagGroupAffinity: Map<string, { group: string; count: number }[]>
   /** 按九组问题切出的语料象限：`问题:选项` → 句子下标。仅用于检索，不呈现在前端 */
   quadrants: Map<string, Set<number>>
+  familyVectors: Map<string, SemanticVector>
   clauses: string[]
   textBlob: string
   stats: {
@@ -167,7 +183,7 @@ export function buildCorpus(sourceGroups: CorpusGroup[] = GROUPS): CorpusIndex {
       let popularity: 1 | 2 | 3 = isCliche ? 3 : 2
       if (!isCliche && (group.tags.includes('冷门') || (length === 'tiny' && clean.length <= 8))) popularity = 1
 
-      entries.push({
+      const entry: Signature = {
         id: `s${++counter}`,
         text: clean,
         note: note?.trim(),
@@ -183,7 +199,10 @@ export function buildCorpus(sourceGroups: CorpusGroup[] = GROUPS): CorpusIndex {
         length,
         popularity,
         hasSource,
-      })
+        vector: zeroVector(),
+      }
+      entry.vector = buildEntryVector(entry)
+      entries.push(entry)
     }
   }
 
@@ -261,6 +280,19 @@ export function buildCorpus(sourceGroups: CorpusGroup[] = GROUPS): CorpusIndex {
   const groups = new Map<string, Signature[]>()
   entries.forEach((e) => groups.set(e.groupName, [...(groups.get(e.groupName) || []), e]))
 
+  const familyVectors = new Map<string, SemanticVector>()
+  const familyCounts = new Map<string, number>()
+  entries.forEach((e) => {
+    const vector = familyVectors.get(e.family) || zeroVector()
+    for (const dim of VECTOR_DIMS) vector[dim] += e.vector[dim]
+    familyVectors.set(e.family, vector)
+    familyCounts.set(e.family, (familyCounts.get(e.family) || 0) + 1)
+  })
+  familyVectors.forEach((vector, family) => {
+    const count = familyCounts.get(family) || 1
+    for (const dim of VECTOR_DIMS) vector[dim] /= count
+  })
+
   const languages = new Set(entries.flatMap((e) => e.lang))
   const families = new Set(sourceGroups.map((g) => g.family))
   const textBlob = entries.map((e) => e.text.toLowerCase()).join('\n')
@@ -272,6 +304,7 @@ export function buildCorpus(sourceGroups: CorpusGroup[] = GROUPS): CorpusIndex {
     groups,
     tagGroupAffinity,
     quadrants,
+    familyVectors,
     clauses: Array.from(clauses),
     textBlob,
     stats: {
@@ -304,6 +337,8 @@ export type ProfileFlags = {
   avoidTags: string[]
   lengthId: string
   decorId: string
+  premium: boolean
+  profileVector: SemanticVector
 }
 
 export function readProfile(profile: Profile): ProfileFlags {
@@ -330,7 +365,10 @@ export function readProfile(profile: Profile): ProfileFlags {
       }
     }
   }
-  return { tags, langTags, avoidIds, avoidTags, lengthId, decorId }
+  const premium = tags.includes('高级感')
+    || Object.values(profile.answers).some((ids) => ids.includes('premium'))
+  const profileVector = vectorFromTags(tags)
+  return { tags, langTags, avoidIds, avoidTags, lengthId, decorId, premium, profileVector }
 }
 
 /**
@@ -460,6 +498,16 @@ function seededRandom(seed: number) {
   }
 }
 
+/** 稳定的语料曝光值：同一 seed 下让全量语料都有非零机会进入结果 */
+function hashUnit(input: string) {
+  let h = 2166136261
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0) / 4294967296
+}
+
 function overlapScore(text: string, grams: string[]) {
   if (grams.length === 0) return 0
   const lower = text.toLowerCase()
@@ -535,6 +583,7 @@ function isBlocked(entry: Signature, flags: ProfileFlags) {
   if (avoid.includes('love') && entry.tags.includes('爱情')) return true
   if (avoid.includes('soup') && (entry.tags.includes('打卡') || entry.tags.includes('上进'))) return true
   if (avoid.includes('sad') && (entry.tags.includes('怀旧') || entry.tags.includes('遗憾'))) return true
+  if (flags.premium && hasPremiumConflict(entry)) return true
   return false
 }
 
@@ -610,7 +659,7 @@ export function boundaryOf(index: CorpusIndex, profile: Profile, minSize = 24): 
 
   const hits = new Map<number, number>()
   for (const set of sets) for (const i of set) hits.set(i, (hits.get(i) || 0) + 1)
-  let minHits = Math.max(1, Math.ceil(answered * 0.6))
+  let minHits = Math.max(1, Math.ceil(answered * 0.5))
   let allowed = new Set<number>()
   let relaxed = 0
   for (;;) {
@@ -629,8 +678,22 @@ export function boundaryOf(index: CorpusIndex, profile: Profile, minSize = 24): 
   return { allowed, sets, answered, minHits, relaxed }
 }
 
-/** 关键词的风格：标签↔类目共现 → 含该词的句子分布 → 词典映射标签 */
+/** 关键词风格先从概念画像找类目，再比较隐藏语义向量；正文出现同名词不再是依据 */
 export function styleOfKeyword(index: CorpusIndex, label: string): string | null {
+  const concept = conceptProfileFor(label)
+  if (concept) {
+    for (const groupId of concept.profile.preferGroups) {
+      const family = index.entries.find((e) => e.groupId === groupId)?.family
+      if (family) return family
+    }
+    let best: { family: string; score: number } | null = null
+    for (const [family, vector] of index.familyVectors) {
+      const score = cosine(vector, concept.profile.vector)
+      if (!best || score > best.score) best = { family, score }
+    }
+    if (best?.family) return best.family
+  }
+
   const votes = new Map<string, number>()
   const bump = (family: string, weight: number) => votes.set(family, (votes.get(family) || 0) + weight)
   const fromTag = (tag: string, weight = 1) => {
@@ -639,15 +702,20 @@ export function styleOfKeyword(index: CorpusIndex, label: string): string | null
       if (family) bump(family, a.count * weight)
     }
   }
-
   fromTag(label)
-  if (votes.size === 0) {
-    for (const e of index.entries) if (e.text.includes(label)) bump(e.family, 1)
+  for (const tag of LEXICON[label]?.tags || []) fromTag(tag, 0.8)
+  if (votes.size) return Array.from(votes.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null
+
+  const query = vectorFromTags([label])
+  if (Object.values(query).some((n) => Math.abs(n) > 0.02)) {
+    let best: { family: string; score: number } | null = null
+    for (const [family, vector] of index.familyVectors) {
+      const score = cosine(vector, query)
+      if (!best || score > best.score) best = { family, score }
+    }
+    return best?.family || null
   }
-  if (votes.size === 0) {
-    for (const tag of LEXICON[label]?.tags || []) fromTag(tag)
-  }
-  return Array.from(votes.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null
+  return null
 }
 
 /** 为每个结果位分配不同大类 + 不同关键词侧重；大类由关键词风格决定 */
@@ -734,15 +802,16 @@ export function generate(
 ): GenerateResult {
   const rnd = seededRandom(seed)
   const flags = readProfile(profile)
-  const kwTags = keywords.map((k) => k.label)
+  const keywordLabels = keywords.map((k) => k.label)
   const niche = profile.niche / 100
   const semanticWords = extractSemanticWords(index, profile.direction)
   const boundary = boundaryOf(index, profile, Math.max(24, profile.count * 3))
+  const queryVector = queryVectorFrom(profile.direction, keywordLabels, flags.tags)
   const dimensionWeight: Partial<Record<Dimension, number>> = {
     mood: 1.25, theme: 1.15, lang: 1.4, genre: 1.35, age: 1.1, vibe: 1.1, scene: 0.9, decor: 0.8, free: 1.5,
   }
 
-  // 阶段一：九题象限划定边界，关键词在句子正文 / 标签里搜索
+  // 全量候选：概念画像 + 情感向量 + 问卷软边界，正文同字只保留极弱证据
   const scored: { i: number; score: number; hits: string[] }[] = []
   index.entries.forEach((entry, i) => {
     if (isBlocked(entry, flags)) return
@@ -751,36 +820,48 @@ export function generate(
     let score = 0
     const hits: string[] = []
     for (const kw of keywords) {
+      if (conceptProfileFor(kw.label)) {
+        const conceptBoost = conceptScore(entry, kw.label)
+        score += conceptBoost * Math.min(1.6, kw.weight) * (dimensionWeight[kw.dimension] || 1)
+        if (conceptBoost > 0.15) hits.push(kw.label)
+        continue
+      }
       const inText = entry.text.includes(kw.label)
       const inTag = entry.tags.includes(kw.label)
       if (!inText && !inTag) continue
       const idf = index.idf.get(kw.label) ?? 0.45
-      score += (0.5 + idf) * kw.weight * (dimensionWeight[kw.dimension] || 1) * (inText ? 1.25 : 0.9)
+      score += (0.5 + idf) * kw.weight * (dimensionWeight[kw.dimension] || 1) * (inText ? 0.65 : 0.9)
       hits.push(kw.label)
     }
-    if (score === 0 && kwTags.length > 0) return
-    score += quadrantHits * 1.6
-    if (boundary.answered > 0 && !boundary.allowed.has(i)) score -= 4
-    score += overlapScore(entry.text, semanticWords)
+    score += cosine(entry.vector, queryVector) * 3.6
+    score += cosine(entry.vector, flags.profileVector) * 2.2
+    score += Math.min(quadrantHits, boundary.answered || 1) * 1.15
+    if (boundary.answered > 0) score += boundary.allowed.has(i) ? 1.3 : -1.2
+    score += overlapScore(entry.text, semanticWords) * 0.35
     score += langScore(entry, flags.langTags)
     score += lengthPenalty(entry, flags.lengthId)
+    if (flags.premium) {
+      score += premiumPenalty(entry)
+      score += entry.vector.premium * 2.2
+      score -= Math.max(0, entry.vector.energy) * 2.4
+      score -= Math.max(0, entry.vector.playful) * 2.8
+    }
     if (flags.avoidIds.includes('cliche')) {
       score += entry.popularity === 3 ? -3.5 : entry.popularity === 1 ? 1.2 : 0
     } else {
       score += (3 - entry.popularity) * niche * 0.8
     }
-    score += rnd() * 0.6
+    score += hashUnit(`${seed}:${entry.id}`) * 1.35
+    score += rnd() * 0.45
     scored.push({ i, score: Math.max(0.01, score), hits })
   })
   scored.sort((a, b) => b.score - a.score)
 
-  const originalCount = Math.round((profile.originality / 100) * Math.min(6, profile.count))
+  const originalCount = Math.round((profile.originality / 100) * Math.min(2, profile.count))
   const retrievedCount = profile.count - originalCount
-  // 边界内候选足够时，候选池只取边界内的句子；不足才纳入边界外的句子兜底
   const inside = boundary.answered > 0 ? scored.filter((c) => boundary.allowed.has(c.i)) : scored
-  const outside = boundary.answered > 0 ? scored.filter((c) => !boundary.allowed.has(c.i)) : []
-  const strictPool = boundary.answered > 0 && inside.length >= Math.max(16, retrievedCount * 2)
-  const pool = [...inside, ...outside].slice(0, 4000)
+  const strictPool = false
+  const pool = scored
   const clean = new Map<number, string>()
   for (const c of pool) clean.set(c.i, plainText(index.entries[c.i].text))
   const weightOf = new Map(keywords.map((k) => [k.label, k.weight]))
@@ -789,27 +870,46 @@ export function generate(
   const usedGroups = new Set<string>()
   const usedFamilies = new Set<string>()
   const chosenTexts: string[] = []
+  const chosenVectors: SemanticVector[] = []
   const picks: { i: number; score: number; hits: string[]; focusHits: string[] }[] = []
   // 5 字以下的超短句尽量不选；一批结果里最多保留 1 条
   let shortCount = 0
 
   for (let n = 0; n < retrievedCount; n++) {
     const slot = plan.slots[n]
-    // 边界内还有没用过的风格时只在边界内取句；风格用尽才允许向外扩，保证 8 句风格各异
-    const boundaryCanDiversify = strictPool && inside.some((c) => !usedFamilies.has(index.entries[c.i].family))
-    const candidates = boundaryCanDiversify ? inside : pool
-    const hasUnusedFamily = candidates.some((c) => !usedFamilies.has(index.entries[c.i].family))
+    const exploreSlot = n === 2 || (retrievedCount >= 5 && n === retrievedCount - 2)
+    let candidates = pool
+    if (exploreSlot && pool.length) {
+      // 从全量语料里随机开窗，让低字面分但语义合适的句子也有机会被生成
+      const sampled = new Map<number, (typeof pool)[number]>()
+      const sampleSize = Math.min(640, pool.length)
+      for (let s = 0; s < sampleSize; s++) {
+        const cand = pool[Math.floor(rnd() * pool.length)]
+        sampled.set(cand.i, cand)
+      }
+      candidates = Array.from(sampled.values())
+    }
     let best: { i: number; score: number; hits: string[]; focusHits: string[] } | null = null
     for (const cand of candidates) {
       const entry = index.entries[cand.i]
-      if (hasUnusedFamily && usedFamilies.has(entry.family)) continue
       const focusHits = slot.focus.filter((f) => entry.tags.includes(f) || entry.text.includes(f))
-      let score = cand.score * 0.42
+      let score = exploreSlot ? cand.score * 0.18 + rnd() * 14 : cand.score * 0.42
       for (const f of focusHits) score += (weightOf.get(f) ?? 1) * 1.6
       if (entry.family === slot.family) score += 3.4
+      else score -= 1.8
       if (usedGroups.has(entry.groupName)) score -= 9
-      if (usedFamilies.has(entry.family)) score -= 7
-      score += rnd() * 1.2
+      if (usedFamilies.has(entry.family)) score -= 8
+      for (const chosenVector of chosenVectors) {
+        const distance = styleDistance(entry.vector, chosenVector)
+        if (distance < 0.35) score -= 6
+        else score += Math.min(2, distance) * 1.4
+      }
+      if (flags.premium) {
+        score += entry.vector.premium * 2.2
+        score -= Math.max(0, entry.vector.energy) * 2.6
+        score -= Math.max(0, entry.vector.playful) * 3
+      }
+      score += rnd() * 2.2
       const text = clean.get(cand.i) || ''
       if (chosenTexts.some((t) => tooSimilar(t, text))) score -= 14
       if (visibleLength(entry.text) < 5) score -= shortCount >= 1 ? 1000 : 2.4
@@ -822,6 +922,7 @@ export function generate(
     usedGroups.add(entry.groupName)
     usedFamilies.add(entry.family)
     chosenTexts.push(clean.get(best.i) || entry.text)
+    chosenVectors.push(entry.vector)
   }
 
   const max = Math.max(...picks.map((p) => p.score), 1)
